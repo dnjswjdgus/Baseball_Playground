@@ -29,8 +29,9 @@ EVENT_CLASS_MAP = {
 
 
 def load_statcast(start_dt: str, end_dt: str) -> pd.DataFrame:
-    """지정 기간의 Statcast pitch-level 데이터를 수집한다."""
-    return statcast(start_dt=start_dt, end_dt=end_dt)
+    """지정 기간의 Statcast 투구 자료 중 정규시즌(game_type == 'R')만 반환한다."""
+    df = statcast(start_dt=start_dt, end_dt=end_dt)
+    return df[df["game_type"] == "R"].copy()
 
 
 def map_event_class(event: str) -> str:

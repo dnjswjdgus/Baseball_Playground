@@ -1,63 +1,76 @@
-# Bunt Decision Analysis by Batting Order
+# Swing Away or Sacrifice Bunt?
 
-Comparing the value of swinging away vs. sacrifice bunting with a runner on first and no outs, based on the offensive quality of the current and next batter — measured both by expected runs and by the probability of scoring at least one run.
+**A batting-order view of the bunt decision with a runner on first and no outs, judged by expected runs and by the probability of scoring (2025 MLB regular season).**
 
-## Background
+<p align="center">
+  <img src="figures/01_decision_map.png" alt="Swing minus bunt over current and next batter wOBA" width="100%">
+</p>
 
-The sacrifice bunt is one of the plays most consistently criticized as inefficient in sabermetrics. Bill James's "Ten Commandments of Sabermetrics" lists *"Thou shalt not bunt"* as its very first principle — trading an out for a base generally reduces expected runs.
+<p align="center"><sub>Red cells favor swinging away, blue cells favor a successful sacrifice bunt. The dashed line marks break-even.</sub></p>
 
-But I wondered whether this conclusion holds in every situation. If the current batter is weak and the next batter is a top-of-the-league hitter like Aaron Judge, it might actually be more advantageous to advance the runner and hand the scoring opportunity to the next batter, rather than have the current batter try to drive in the run himself.
+## Key findings
 
-So I analyzed how the value of swinging away versus sacrifice bunting, in a no-out runner-on-first situation, changes depending on the offensive quality of the current and next batter. I compared strategy value not just by expected runs, but also by the probability of scoring at least one run before the inning ends — to see whether the optimal choice depends on the batting team's actual goal.
+| | Expected runs | Probability of scoring |
+|---|---|---|
+| Swing is better in | **100%** of 22,500 wOBA combinations | **83.2%** of combinations |
+| Bunt is better in | none | **16.8%** — weak current batter, strong next batter |
+| Largest gap | swing ahead by 0.07 to 0.49 runs | bunt ahead by up to **4.1 points** |
 
-## Data & Methods
+- **If the goal is to maximize runs, swing away.** Giving up an out is never repaid, even with a .200 hitter at the plate and a .498 hitter on deck.
+- **If one run is all that matters, the answer depends on the lineup.** A .300 current batter is better off bunting once the next batter reaches .434 wOBA; a .250 batter, once the next one reaches .370. A .400 batter should always swing.
+- **Example:** current batter .299, next batter .480. Swinging gives **+0.124 expected runs**, but bunting gives **+1.77 percentage points** of scoring probability.
 
-I used 2025 MLB Statcast play-by-play data collected via `pybaseball`. First, I built a Run Expectancy Matrix by calculating the average runs scored through the end of the inning for each of the 24 base-out states (combinations of outs and runners). I also separately calculated the probability of scoring at least one run before the inning ends from each state.
+<p align="center">
+  <img src="figures/02_break_even.png" alt="Swing minus bunt versus next batter wOBA" width="100%">
+</p>
 
-I represented batter quality using wOBA and a base-out run expectancy framework, following the strategy evaluation approach used in Tom Tango, Mitchel Lichtman, and Andrew Dolphin's *The Book: Playing the Percentages in Baseball*. Using 2025 FanGraphs wOBA weights, I calculated each batter's wOBA, then, for batters with at least 300 plate appearances, weighted-averaged the outcomes of players with wOBA close to a given target value. This produced estimated probabilities for BB/HBP, single, double, triple, home run, strikeout, in-play out, and double play.
+## Why it matters
 
-Swinging away was calculated as the expected runs and score probability when the current batter hits with a runner on first and no outs. To simplify the bunt scenario, I assumed a successful sacrifice bunt converts a no-out runner-on-first state into a one-out runner-on-second state, then calculated the expected runs and score probability for the next batter hitting from that state.
+Sabermetrics treats the sacrifice bunt as inefficient: trading an out for a base lowers expected runs on average. But that average hides the batting order. When a weak hitter is followed by an elite one, advancing the runner may be worth more than letting the weak hitter try to drive him in. This project quantifies where that happens, and shows that the answer changes with the goal — maximizing expected runs versus scoring at least once.
 
-Finally, I varied both the current and next batter's wOBA from .200 to .498 across all combinations, and visualized the difference between swinging and bunting as a heatmap.
+<p align="center">
+  <img src="figures/03_state_values.png" alt="Run expectancy and scoring probability for the 24 base-out states" width="78%">
+</p>
 
-## Results
+<p align="center"><sub>Outlined cells: swinging starts from 0 out with a runner on 1B; a successful bunt moves to 1 out with a runner on 2B.</sub></p>
 
-By **expected runs**, swinging away outperformed bunting across every batter combination analyzed. Even in the most extreme case — a weak current batter and a strong next batter — the deliberate cost of an out was never offset.
+## How it works
 
-By **probability of scoring at least one run**, however, the picture changed. As the current batter's wOBA decreased and the next batter's wOBA increased, a region emerged where bunting produced a higher scoring probability than swinging. For example, with a current batter at .299 wOBA and a next batter at .480 wOBA, swinging away had about 0.129 more expected runs than bunting, but bunting had about 1.56 percentage points higher probability of scoring at least one run.
+1. **State tables.** From 2025 regular-season Statcast (2,430 games, 183,245 plate appearances), build the Run Expectancy matrix for the 24 base-out states and the probability of scoring at least one run from each state, plus the transition table from (state, outcome) to the end state.
+2. **Batter quality as wOBA.** Compute each hitter's wOBA with 2025 FanGraphs weights, then estimate the outcome mix of a hitter at any wOBA by Gaussian-weighting the 277 hitters with at least 300 PA (bandwidth .015), following the strategy-evaluation framework of *The Book*. Outcomes are BB/HBP, single, double, triple, home run, strikeout, in-play out and double play.
+3. **Swing versus bunt.** Swinging is the current batter hitting from 0 out with a runner on 1B. A successful bunt is assumed to produce 1 out with a runner on 2B, with the next batter hitting. Each outcome is valued by the end state it creates, and the two options are compared for every current/next wOBA pair from .200 to .498.
 
-In other words, if the goal is to maximize runs scored, swinging away was consistently better — but in situations where scoring even a single run is essential, bunting could offer a higher scoring probability depending on the batting order composition. This shows that the same strategic choice can lead to different conclusions depending on whether expected runs or score probability is used as the decision criterion.
+<p align="center">
+  <img src="figures/04_event_profile.png" alt="Outcome mix by batter wOBA" width="85%">
+</p>
 
-## Limitations & Future Work
-
-This analysis assumed a successful sacrifice bunt cleanly converts a no-out runner-on-first state into a one-out runner-on-second state. In real games, bunts can fail, lead runners can be thrown out, bunts can go for hits, or fielding errors can occur — so the actual expected value of a bunt attempt could differ from this analysis.
-
-I also only modeled the offensive quality of the current and next batter individually; the rest of the batting order is implicitly folded into the league-average run expectancy. Real decision-making should also weigh the composition of the lineup beyond the next batter, baserunner speed, defensive positioning, and pitcher type.
-
-This analysis is meant less as a model for predicting any single game situation, and more as a way to quantify, with sufficient sample size, under what conditions a given strategy becomes relatively more favorable. Future work could incorporate bunt success probability, baserunner speed, and the rest of the batting order into the model, and extend it to Win Expectancy that accounts for inning and score differential — producing more concrete, game-usable criteria for strategic decisions.
-
-## Run It
+## Run it
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-`notebooks/bunt_analysis.ipynb` contains the original analysis notebook with exploratory data analysis and step-by-step validation.
-
-## Folder Structure
+Pitch data are downloaded once with `pybaseball` and cached. The four figures are written to `figures/`. Use `--start` and `--end` to change the date range.
 
 ```
 bunt-strategy-analysis/
 ├── main.py                 # Pipeline entry point
 ├── src/
-│   ├── preprocessing.py    # Statcast collection, PA table, RE / score-probability tables
-│   ├── modeling.py         # wOBA-based event probability estimation, swing vs. bunt comparison
-│   └── visualize.py        # Decision heatmap
-└── notebooks/
-    └── bunt_analysis.ipynb
+│   ├── config.py           # Constants: dates, event classes, wOBA weights, decision states
+│   ├── preprocessing.py    # Statcast download, plate-appearance table, RE / scoring tables
+│   ├── modeling.py         # wOBA kernel outcome model, swing versus bunt comparison
+│   └── visualize.py        # Figures
+└── figures/
 ```
 
-## Tech Stack
+## Limitations
 
-Python, pandas, NumPy, scikit-learn, Matplotlib, [pybaseball](https://github.com/jldbc/pybaseball) (Statcast collection)
+- A bunt is assumed to succeed cleanly. Real bunts can fail, retire the lead runner, become hits or draw errors, so the true value of an attempt differs.
+- Only the current and next batters are modeled; the rest of the lineup is folded into league-average run expectancy. Runner speed, defensive positioning and the pitcher are not considered.
+- The 277 qualified hitters span .244 to .463 wOBA. Estimates near the edges of the grid, such as the flat region above .46, rest on very few hitters.
+- Values are for the state "no outs, runner on first" only and ignore inning and score. A natural extension is win expectancy.
+
+## Tech stack
+
+Python, pandas, NumPy, Matplotlib, Seaborn, [pybaseball](https://github.com/jldbc/pybaseball) (Statcast)

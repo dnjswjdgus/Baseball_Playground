@@ -1,121 +1,103 @@
-"""Statcast 원자료를 PA(타석) 단위 상태-전이 데이터로 변환하고,
-Run Expectancy(기대득점) 및 Score Probability(득점확률) 테이블을 생성한다.
+"""Turn raw Statcast pitches into plate-appearance states and transition tables.
+
+Outputs the 24 base-out Run Expectancy table, the probability of scoring at least
+one run from each state, and the (state, event) -> end-state transition table.
 """
 
 import pandas as pd
-from pybaseball import statcast
+from pybaseball import cache, statcast
+
+from src.config import EVENT_CLASS_MAP
 
 PA_ID = ["game_pk", "at_bat_number"]
 
-EVENT_CLASS_MAP = {
-    "walk": "BB_HBP",
-    "hit_by_pitch": "BB_HBP",
-    "single": "SINGLE",
-    "double": "DOUBLE",
-    "triple": "TRIPLE",
-    "home_run": "HOME_RUN",
-    "strikeout": "STRIKEOUT",
-    "grounded_into_double_play": "GIDP",
-    "field_out": "BIP_OUT",
-    "force_out": "BIP_OUT",
-    "fielders_choice_out": "BIP_OUT",
-    "fielders_choice": "BIP_OUT",
-    "double_play": "BIP_OUT",
-    "triple_play": "BIP_OUT",
-    "sac_fly": "BIP_OUT",
-    "sac_fly_double_play": "BIP_OUT",
-    "strikeout_double_play": "BIP_OUT",
-}
-
 
 def load_statcast(start_dt: str, end_dt: str) -> pd.DataFrame:
-    """지정 기간의 Statcast 투구 자료 중 정규시즌(game_type == 'R')만 반환한다."""
+    """Download Statcast pitch-level data and keep regular-season games only."""
+    cache.enable()
     df = statcast(start_dt=start_dt, end_dt=end_dt)
     return df[df["game_type"] == "R"].copy()
 
 
 def map_event_class(event: str) -> str:
-    """이벤트를 분석에 사용할 8개 클래스(BB_HBP/SINGLE/.../GIDP)로 축약한다."""
+    """Collapse a Statcast event into one of the eight model classes."""
     return EVENT_CLASS_MAP.get(event, "EXCLUDED")
 
 
 def build_pa_table(df_raw: pd.DataFrame) -> pd.DataFrame:
-    """pitch-level 데이터를 PA(타석) 단위로 압축하고 시작/종료 상태(outs, bases)를 부여한다."""
+    """Collapse pitches into one row per plate appearance with start and end states."""
     raw = df_raw.sort_values(["game_pk", "at_bat_number", "pitch_number"]).copy()
 
-    pa_start = raw.drop_duplicates(subset=PA_ID, keep="first").copy()
-    pa_start = pa_start[["game_pk", "at_bat_number", "outs_when_up", "on_1b", "on_2b", "on_3b"]].copy()
+    # Start state comes from the first pitch of each plate appearance
+    pa_start = raw.drop_duplicates(subset=PA_ID, keep="first")[
+        PA_ID + ["outs_when_up", "on_1b", "on_2b", "on_3b"]
+    ].copy()
     pa_start["start_outs"] = pa_start["outs_when_up"].astype(int)
     pa_start["start_bases"] = (
         pa_start["on_1b"].notna().astype(int).astype(str)
         + pa_start["on_2b"].notna().astype(int).astype(str)
         + pa_start["on_3b"].notna().astype(int).astype(str)
     )
-    pa_start = pa_start[["game_pk", "at_bat_number", "start_outs", "start_bases"]].copy()
+    pa_start = pa_start[PA_ID + ["start_outs", "start_bases"]]
 
+    # Result comes from the last pitch that carries an event
     pa_result = (
         raw.dropna(subset=["events"])
-        .sort_values(["game_pk", "at_bat_number", "pitch_number"])
         .drop_duplicates(subset=PA_ID, keep="last")
         .copy()
     )
-
     pa_all = pa_result[
-        [
-            "game_pk", "game_date", "inning", "inning_topbot", "at_bat_number",
-            "batter", "player_name", "events", "bat_score", "post_bat_score",
-        ]
-    ].copy()
+        PA_ID
+        + ["game_date", "inning", "inning_topbot", "batter", "player_name", "events", "bat_score", "post_bat_score"]
+    ].merge(pa_start, on=PA_ID, how="left")
 
-    pa_all = pa_all.merge(pa_start, on=["game_pk", "at_bat_number"], how="left")
     pa_all["runs_on_play"] = pa_all["post_bat_score"] - pa_all["bat_score"]
     pa_all["event_class"] = pa_all["events"].apply(map_event_class)
 
+    # The end state of a plate appearance is the start state of the next one in the same half-inning
     pa_all["offense_id"] = (
         pa_all["game_pk"].astype(str) + "_" + pa_all["inning"].astype(str) + "_" + pa_all["inning_topbot"].astype(str)
     )
-    pa_all = pa_all.sort_values(["game_pk", "at_bat_number"]).copy()
-    pa_all["end_outs"] = pa_all.groupby("offense_id")["start_outs"].shift(-1).fillna(3).astype(int)
-    pa_all["end_bases"] = pa_all.groupby("offense_id")["start_bases"].shift(-1).fillna("000")
+    pa_all = pa_all.sort_values(PA_ID).copy()
+    grouped = pa_all.groupby("offense_id")
+    pa_all["end_outs"] = grouped["start_outs"].shift(-1).fillna(3).astype(int)
+    pa_all["end_bases"] = grouped["start_bases"].shift(-1).fillna("000")
 
     return pa_all
 
 
 def build_transition_table(pa_all: pd.DataFrame) -> pd.DataFrame:
-    """(시작상태, 이벤트) -> (종료상태) 전이확률표를 생성한다."""
-    pa = pa_all[pa_all["event_class"] != "EXCLUDED"].copy()
+    """Estimate P(runs scored, end state | start state, event class)."""
+    pa = pa_all[pa_all["event_class"] != "EXCLUDED"]
 
-    transition_counts = (
-        pa.groupby(["start_outs", "start_bases", "event_class", "runs_on_play", "end_outs", "end_bases"])
-        .size()
-        .reset_index(name="n")
+    keys = ["start_outs", "start_bases", "event_class"]
+    transitions = (
+        pa.groupby(keys + ["runs_on_play", "end_outs", "end_bases"]).size().reset_index(name="n")
     )
-    transition_counts["total"] = transition_counts.groupby(["start_outs", "start_bases", "event_class"])["n"].transform("sum")
-    transition_counts["prob"] = transition_counts["n"] / transition_counts["total"]
-    return transition_counts
+    transitions["total"] = transitions.groupby(keys)["n"].transform("sum")
+    transitions["prob"] = transitions["n"] / transitions["total"]
+    return transitions
+
+
+def _runs_to_end_of_inning(pa_all: pd.DataFrame) -> pd.DataFrame:
+    """Attach the runs scored from each plate appearance to the end of the half-inning."""
+    inning_end_score = pa_all.groupby("offense_id")["post_bat_score"].last().rename("inning_end_score")
+    pa = pa_all.merge(inning_end_score, on="offense_id", how="left")
+    pa["runs_to_end_inning"] = pa["inning_end_score"] - pa["bat_score"]
+    return pa
 
 
 def build_run_expectancy_table(pa_all: pd.DataFrame) -> pd.DataFrame:
-    """(outs, bases) 상태별 이닝 종료까지의 평균 득점(Run Expectancy)을 계산한다."""
-    inning_end_score = pa_all.groupby("offense_id")["post_bat_score"].last().reset_index(name="inning_end_score")
-    pa_re = pa_all.merge(inning_end_score, on="offense_id", how="left")
-    pa_re["runs_to_end_inning"] = pa_re["inning_end_score"] - pa_re["bat_score"]
-
-    re_table = pa_re.groupby(["start_outs", "start_bases"])["runs_to_end_inning"].mean().reset_index(name="RE")
-    re_table["RE"] = re_table["RE"].round(4)
-    return re_table.sort_values(["start_outs", "start_bases"]).reset_index(drop=True)
+    """Average runs scored to the end of the inning from each of the 24 base-out states."""
+    pa = _runs_to_end_of_inning(pa_all)
+    table = pa.groupby(["start_outs", "start_bases"])["runs_to_end_inning"].mean().reset_index(name="RE")
+    table["RE"] = table["RE"].round(4)
+    return table.sort_values(["start_outs", "start_bases"]).reset_index(drop=True)
 
 
 def build_score_probability_table(pa_all: pd.DataFrame) -> pd.DataFrame:
-    """(outs, bases) 상태별 이닝 내 최소 1점 이상 득점할 확률을 계산한다."""
-    inning_end_score = pa_all.groupby("offense_id")["post_bat_score"].last().reset_index(name="inning_end_score")
-    pa_re = pa_all.merge(inning_end_score, on="offense_id", how="left")
-    pa_re["runs_to_end_inning"] = pa_re["inning_end_score"] - pa_re["bat_score"]
-
-    score_prob_table = (
-        pa_re.assign(scored=(pa_re["runs_to_end_inning"] > 0).astype(int))
-        .groupby(["start_outs", "start_bases"])["scored"]
-        .mean()
-        .reset_index(name="score_prob")
-    )
-    return score_prob_table.sort_values(["start_outs", "start_bases"]).reset_index(drop=True)
+    """Probability of scoring at least one more run in the inning from each base-out state."""
+    pa = _runs_to_end_of_inning(pa_all)
+    pa["scored"] = (pa["runs_to_end_inning"] > 0).astype(int)
+    table = pa.groupby(["start_outs", "start_bases"])["scored"].mean().reset_index(name="score_prob")
+    return table.sort_values(["start_outs", "start_bases"]).reset_index(drop=True)

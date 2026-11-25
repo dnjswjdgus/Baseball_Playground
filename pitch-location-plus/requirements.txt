@@ -3,7 +3,6 @@ numpy
 matplotlib
 seaborn
 scipy
-statsmodels
 scikit-learn
 xgboost
 pybaseball

@@ -1,61 +1,78 @@
-# Location+: A Pitcher Command Metric
+# Location+
 
-A custom metric that quantifies a pitcher's command as the value of a pitch location combined with how consistently that location is repeated, expressed on a 20-80 scouting scale.
+**A pitcher command metric that combines how valuable a pitch location is with how consistently it is repeated, graded on the 20-80 scouting scale (2025 MLB regular season).**
 
-## Background
+<p align="center">
+  <img src="figures/01_location_value_maps.png" alt="Predicted run value by pitch location" width="100%">
+</p>
 
-I developed a custom metric, Location+, to quantitatively evaluate a pitcher's command. Command has traditionally been evaluated using outcome-based metrics like BB%, but walk rate alone doesn't fully capture how well a pitcher locates the ball. Metrics like Command+ attempt to estimate a pitcher's intended location, but public data alone has clear limits in accurately inferring a pitcher's actual intent.
+<p align="center"><sub>Mean predicted run value of a pitch by location (right-handed pitcher vs right-handed batter, catcher's view). Red is good for the pitcher, blue is bad.</sub></p>
 
-Instead of trying to directly estimate intent, I defined command as *"the ability to consistently throw to locations that are difficult for hitters to attack."* I aimed to measure both throwing to good locations and repeating the same location, then combine both into a single metric.
+## Key findings
 
-## Data & Methods
+- **590 pitchers** qualified (at least 60 pitches per pitch type, on at least half of their pitch types).
+- **Top grades:** JoJo Romero and Tyler Mahle earn **80**; Austin Cox, Parker Messick, Hoby Milner, Steven Matz and Trevor Williams earn **75**.
+- **Reliable with modest samples.** Split-half reliability passes 0.7 by about 50 pitches per pitch type for the six main pitches, which supports the 60-pitch cutoff.
+- **A sound grade scale.** The final distribution is centered at 50 with a standard deviation of 10, and a D'Agostino K² test does not reject normality (p = 0.596).
 
-I used 2025 MLB Statcast data collected via `pybaseball`. First, to estimate how valuable each pitch location was to the pitcher, I built an XGBoost regression model using `delta_pitcher_run_exp` as the target variable, with pitch location (`plate_x`, `plate_z`), pitch type, count, and batter/pitcher handedness as inputs. I applied 5-fold out-of-fold (OOF) prediction so that each pitch was predicted by a model that hadn't seen it during training, producing a conditional location value for each pitch.
+<p align="center">
+  <img src="figures/05_leaderboard.png" alt="Location+ distribution and top pitchers" width="100%">
+</p>
 
-Next, I measured pitch consistency separately. I applied Gaussian KDE to pitch coordinates grouped by pitcher, pitch type, and batter handedness to estimate a 2D distribution of pitch locations, then computed a log-density score for how tightly clustered each pitch was within its own distribution. This was then standardized as a Z-score by pitch type, indicating how consistent a given pitch type's location was relative to the league average.
+## What it measures
 
-Finally, I converted the consistency score into a cumulative probability and turned it into a weight of the form `2 x CDF(z)`, which was combined with the location value computed earlier. Pitches repeatedly thrown to good locations were rewarded, while pitches repeatedly thrown to poor locations were penalized more heavily.
+Command is usually judged by outcomes such as BB%, or by models that guess the pitcher's intended target. Public data cannot show intent, so Location+ defines command as *"the ability to consistently throw to locations that are difficult for hitters to attack"* and measures two things:
 
-I validated the metric's reliability by splitting pitches from the same pitcher/pitch-type into odd/even sequence groups, comparing the means of the two groups, and applying the Spearman-Brown formula to the Pearson correlation. For the final calculation, I required at least 60 pitches per pitch type, and only included pitchers where at least half of their pitch types met this threshold.
+1. **Location value:** how good the place a pitch ends up is for the pitcher.
+2. **Repeatability:** how tightly the pitcher groups that pitch type.
 
-## Results
+A pitcher is rewarded for repeating good locations and penalized more for repeating poor ones.
 
-I compared each pitch type's location value to the league average, then computed a pitcher-level value as a pitch-count-weighted average. I converted each pitcher's value into a rank-based cumulative probability, mapped it to a normal distribution quantile, and rescaled it into a 20-80 scouting scale centered at 50 — **Location+**.
+<p align="center">
+  <img src="figures/02_hot_zones.png" alt="Density of four-seam locations for the highest and lowest Location+ pitchers" width="62%">
+</p>
 
-Based on the current code, 595 pitchers met the criteria for final evaluation. Tyler Mahle and Steven Matz received the highest grade with a Location+ of 80, followed by Parker Messick, Austin Cox, and Trevor Williams at 75.
+<p align="center"><sub>Four-seam fastball locations of the highest and the lowest Location+ pitcher with at least 400 four-seamers: a tight cluster versus a wide spread.</sub></p>
 
-I also tested the final distribution for normality. The D'Agostino K² test returned a p-value of 0.5914, failing to reject the null hypothesis of normality at the 0.05 significance level — confirming that the overall distribution was not overly distorted even after converting to the 20-80 scale.
+## How it works
 
-## Limitations & Future Work
+1. **Location value.** An XGBoost regression predicts the pitcher-perspective run value (`delta_pitcher_run_exp`) from the location (`plate_x`, `plate_z`), pitch type, count and batter and pitcher handedness. Five-fold out-of-fold prediction means each pitch is scored by a model that never saw it.
+2. **Consistency.** For each pitcher, pitch type and batter side, a 2D Gaussian kernel density gives every pitch a log-density score. Scores are standardized by pitch type, so a value above 0 means tighter than the league average for that pitch.
+3. **Combine.** The z-score becomes a percentile and a weight of `2 x CDF(z)` (clipped to 0.1-2.0) that multiplies the location value.
+4. **Grade.** Each pitch type is compared with its league average and averaged by pitch count. The pitcher-level value is ranked, mapped to a normal quantile and rescaled to a 20-80 grade centered at 50.
+5. **Reliability.** Pitches of the same pitcher and pitch type are split into odd and even sequences, and the Spearman-Brown corrected correlation of the two halves shows when the metric stabilizes.
 
-Location+ does not directly measure a pitcher's intended target location. So rather than measuring "Command" in the traditional sense, it's closer to a metric evaluating the value and repeatability of actual pitch locations. A pitcher who deliberately spreads the same pitch type across multiple locations as a strategy could be scored as having lower consistency under this framework.
+<p align="center">
+  <img src="figures/03_consistency_by_pitch.png" alt="Location consistency by pitch type" width="48%">
+  <img src="figures/04_stabilization.png" alt="Split-half reliability by sample size" width="48%">
+</p>
 
-The current location-value model also doesn't include velocity, movement, release point, or batter-specific characteristics. The actual difficulty of attacking a pitch at a given location can vary depending on stuff or batter type, so future work should add stuff-related variables to separate "a good location produced by good stuff" from "a pitch that is good purely because of its location."
-
-Ultimately, if a team's own catcher glove/target-location or sign data were available to confirm what a pitcher actually aimed for, Location+ could be extended with intent-vs-execution error to become a more direct command evaluation metric.
-
-## Run It
+## Run it
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-`notebooks/pitch_location_plus.ipynb` contains the original analysis notebook with exploratory data analysis and step-by-step validation.
-
-## Folder Structure
+Pitch data are downloaded once with `pybaseball` and cached, and the six figures are written to `figures/`.
 
 ```
 pitch-location-plus/
 ├── main.py                 # Pipeline entry point
 ├── src/
-│   ├── preprocessing.py    # Statcast collection, count / target variable engineering
-│   ├── modeling.py         # OOF XGBoost, KDE consistency score, stabilization test, Location+ scoring
-│   └── visualize.py        # Zone value maps, KDE hot zones, stabilization curve, distribution plots
-└── notebooks/
-    └── pitch_location_plus.ipynb
+│   ├── config.py           # Constants: dates, features, model and threshold settings
+│   ├── preprocessing.py    # Statcast download, count and target variable engineering
+│   ├── modeling.py         # OOF XGBoost, KDE consistency, reliability, Location+ grade
+│   └── visualize.py        # Figures
+└── figures/
 ```
 
-## Tech Stack
+## Limitations and next steps
 
-Python, pandas, NumPy, SciPy, statsmodels, scikit-learn, XGBoost, Seaborn/Matplotlib, [pybaseball](https://github.com/jldbc/pybaseball)
+- Location+ does not measure the intended target, so it is closer to the value and repeatability of actual locations than to command in the traditional sense. A pitcher who spreads a pitch across locations on purpose can score as less consistent.
+- The location value model ignores velocity, movement, release point and batter traits. Adding stuff variables would separate a good location produced by good stuff from a pitch that is good because of where it went.
+- With catcher target or sign data, Location+ could add intent-versus-execution error and become a more direct command metric.
+
+## Tech stack
+
+Python, pandas, NumPy, SciPy, scikit-learn, XGBoost, Seaborn, Matplotlib, [pybaseball](https://github.com/jldbc/pybaseball)

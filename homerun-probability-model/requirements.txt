@@ -1,8 +1,10 @@
 pandas
 numpy
 matplotlib
+seaborn
 scikit-learn
 lightgbm
 pybaseball
-tabpfn
-torch
+# optional, only to also train TabPFN
+# tabpfn
+# torch

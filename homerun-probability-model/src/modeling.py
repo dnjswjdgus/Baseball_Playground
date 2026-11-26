@@ -93,14 +93,19 @@ def train_lightgbm(X_train, y_train):
     return model.fit(as_category(X_train), y_train, categorical_feature=["home_team"])
 
 
-def train_tabpfn(X_train, y_train, device: str = "cuda"):
-    """TabPFN foundation model. Requires the TABPFN_TOKEN environment variable."""
+def train_tabpfn(X_train, y_train, device: str = "cuda", version: str = "v3.5"):
+    """TabPFN foundation model (default v3.5).
+
+    Requires the TABPFN_TOKEN environment variable, and the license of the chosen
+    model version must be accepted on your Prior Labs account.
+    """
     from tabpfn import TabPFNClassifier
+    from tabpfn.constants import ModelVersion
 
     if "TABPFN_TOKEN" not in os.environ:
         raise RuntimeError("Set the TABPFN_TOKEN environment variable before training TabPFN.")
 
-    model = TabPFNClassifier(device=device)
+    model = TabPFNClassifier.create_default_for_version(ModelVersion(version), device=device)
     return model.fit(as_category(X_train), y_train)
 
 

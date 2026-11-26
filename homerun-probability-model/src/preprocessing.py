@@ -9,9 +9,10 @@ from src.config import HC_X_ORIGIN, HC_Y_ORIGIN, SPRAY_ANGLE_SCALE
 
 
 def load_statcast(start_dt: str, end_dt: str) -> pd.DataFrame:
-    """Download Statcast pitch-level data for the given period (cached by pybaseball)."""
+    """Download Statcast pitch-level data (cached by pybaseball) and keep regular-season games only."""
     cache.enable()
-    return statcast(start_dt=start_dt, end_dt=end_dt, verbose=False)
+    df = statcast(start_dt=start_dt, end_dt=end_dt, verbose=False)
+    return df[df["game_type"] == "R"].copy()
 
 
 def build_dataset(df_origin: pd.DataFrame) -> pd.DataFrame:

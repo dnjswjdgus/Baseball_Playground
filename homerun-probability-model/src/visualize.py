@@ -128,7 +128,7 @@ def plot_calibration_curves(y_test, proba_by_model: dict, path: Path | None = No
     palette = _model_palette(proba_by_model)
 
     fig, ax = plt.subplots(figsize=(6.8, 6.8))
-    ax.plot([0, 1], [0, 1], color=EDGE, linestyle="--", linewidth=1.6, zorder=1)
+    ax.plot([0, 1], [0, 1], color=EDGE, linestyle="--", linewidth=1.6, zorder=1, label="Perfect calibration")
     for name, proba in proba_by_model.items():
         observed, predicted = calibration_curve(y_test, proba, n_bins=10, strategy="quantile")
         ax.plot(predicted, observed, color=palette[name], linewidth=2.2, zorder=2, label=name)
